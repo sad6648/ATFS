@@ -46,7 +46,7 @@ Please download the pre-trained weights and place them in the `models/` director
 To generate adversarial examples that are effective against Stable Diffusion, StarGAN, and VQ-VAE simultaneously, run `ATFS.py`.
 
 ```bash
-accelerate launch ./mist.py \
+accelerate launch ./attack_feature_three/mist.py \
     --cuda \
     --low_vram_mode \
     --instance_data_dir ./data/img \
@@ -54,12 +54,12 @@ accelerate launch ./mist.py \
     --instance_prompt "a person" \
     --mixed_precision bf16 \
     --max_adv_train_steps 100 \
-    --stargan_model_path './stargan_celeba_256/models/200000-G.ckpt' \
+    --stargan_model_path './attack_feature_three/stargan_celeba_256/models/200000-G.ckpt' \
     --stargan_c_dim 5 \
     --target_image_path "./data/AGC-LDW.png" \
     --pgd_eps 0.0314 \
     --batch_size 1 \
-    --vqvae_model_path "./VQ-VAE/" \
+    --vqvae_model_path "./attack_feature_three/VQ-VAE/" \
     --vqvae_scaling_factor 1.0
 ```
 
