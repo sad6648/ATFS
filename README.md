@@ -37,9 +37,9 @@ Please download the pre-trained weights and place them in the `models/` director
 
 **Stable Diffusion v1.5**: https://huggingface.co/docs/diffusers/using-diffusers/img2img
 
-**StarGAN v2**: Pre-trained on CelebA-HQ (`stargan_G.ckpt`).
+**StarGAN v2**: Pre-trained on CelebA-HQ (`stargan_G.ckpt`) :https://huggingface.co/spaces/vipul2412/starGAN
 
-**VQ-VAE**: Standard VQ-VAE checkpoints.
+**VQ-VAE**: Standard VQ-VAE checkpoints:https://huggingface.co/yresearch/VQVAE-Switti
 
 ## 3.Usage
 
