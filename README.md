@@ -67,6 +67,6 @@ Key Arguments:
 
 - `--instance_data_dir`: Path to the clean images you want to protect.
 - `--target_image_path`: **(Critical)** The **Semantic Anchor ($x_{tgt}$)**. As per the paper, using a structured noise image or a style-distinct image works best.
-- `--max_adv_train_steps`: Default is 50. The paper suggests **40 steps** for the optimal efficiency trade-off.
+- `--max_adv_train_steps`: Default is 100. The paper suggests **40 steps** for the optimal efficiency trade-off.
 - `--pgd_eps`: Perturbation budget ($\epsilon$). Default is 0.05 (approx 12/255). For stricter invisibility, use smaller values.
 
