@@ -35,7 +35,7 @@ pip install diffusers transformers accelerate matplotlib scikit-image colorama p
 
 Please download the pre-trained weights and place them in the `models/` directory:
 
-**Stable Diffusion v1.5**: [HuggingFace Link](https://www.google.com/search?q=https://huggingface.co/runwayml/stable-diffusion-v1-5)
+**Stable Diffusion v1.5**: https://huggingface.co/docs/diffusers/using-diffusers/img2img
 
 **StarGAN v2**: Pre-trained on CelebA-HQ (`stargan_G.ckpt`).
 
