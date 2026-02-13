@@ -1,0 +1,43 @@
+# Core Deep Learning (PyTorch & Xformers)
+torch==2.2.2
+torchvision==0.17.2
+xformers==0.0.25
+triton==2.2.0
+
+# Hugging Face Ecosystem
+diffusers==0.14.0
+transformers==4.33.2
+accelerate==0.22.0
+huggingface-hub==0.24.7
+tokenizers==0.13.3
+safetensors==0.4.5
+
+# Computer Vision & Image Processing
+opencv-python==4.10.0.84
+pillow==10.2.0
+scikit-image==0.25.2
+matplotlib==3.10.0
+seaborn==0.13.2
+facenet-pytorch==2.6.0
+pytorch-fid==0.3.0
+
+# Data Science & Math
+numpy==1.26.4
+scipy==1.14.1
+pandas==2.2.3
+
+# Utilities & System
+tqdm==4.67.1
+colorama==0.4.6
+pynvml==12.0.0
+wandb==0.19.1
+gradio==4.44.0
+fire==0.7.0
+click==8.1.8
+
+# Other Dependencies (kept for compatibility)
+protobuf==4.25.5
+sentencepiece==0.2.0
+typing-extensions==4.12.2
+pyyaml==6.0.2
+requests==2.32.3
