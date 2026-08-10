@@ -278,7 +278,7 @@ def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: st
 # 6. Main
 # =========================================================================
 def main(args):
-    print(f"\n{Fore.GREEN}🚀 Launching joint adversarial attack (SD + StarGAN + VQVAE)...{Style.RESET_ALL}")
+    print(f"\n{Fore.GREEN}[Start] Launching joint adversarial attack (SD + StarGAN + VQVAE)...{Style.RESET_ALL}")
 
     accelerator = Accelerator(
         mixed_precision=args.mixed_precision,
@@ -296,7 +296,7 @@ def main(args):
     print(f"Precision: {weight_dtype}")
 
     # 1. Load Stable Diffusion
-    print("\n⏳ Loading Stable Diffusion...")
+    print("\n[Loading] Stable Diffusion...")
     text_encoder_cls = import_model_class_from_model_name_or_path(args.pretrained_model_name_or_path, args.revision)
     text_encoder = text_encoder_cls.from_pretrained(args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision)
     unet = UNet2DConditionModel.from_pretrained(args.pretrained_model_name_or_path, subfolder="unet", revision=args.revision)
@@ -305,7 +305,7 @@ def main(args):
     noise_scheduler = DDIMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
 
     # 2. Load StarGAN
-    print("⏳ Loading StarGAN...")
+    print("[Loading] StarGAN...")
     generator_gan = Generator(args.stargan_g_conv_dim, args.stargan_c_dim, args.stargan_g_repeat_num)
     if os.path.exists(args.stargan_model_path):
         generator_gan.load_state_dict(torch.load(args.stargan_model_path, map_location="cpu"))
@@ -314,7 +314,7 @@ def main(args):
         return
 
     # 3. Load VQ-VAE
-    print("⏳ Loading VQ-VAE...")
+    print("[Loading] VQ-VAE...")
     try:
         vae_vq = AutoencoderKL.from_pretrained(args.vqvae_model_path, local_files_only=True)
     except Exception as e:
@@ -329,13 +329,13 @@ def main(args):
         model.requires_grad_(False)
 
     # 5. Load data
-    print(f"\n📂 Loading data: {args.instance_data_dir}")
+    print(f"\n[Data] Loading data: {args.instance_data_dir}")
     all_original_data = load_data(args.instance_data_dir, size=args.resolution)
     dataset = torch.utils.data.TensorDataset(all_original_data)
     data_loader = torch.utils.data.DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
 
     # 6. Batch attack
-    print(f"\n⚔️ Generating adversarial samples...")
+    print(f"\n[Attack] Generating adversarial samples...")
     all_perturbed_data_list = []
 
     for i, (batch_imgs,) in enumerate(data_loader):
@@ -358,7 +358,7 @@ def main(args):
         all_perturbed_data_list.append(adv_batch.cpu())
 
     # 7. Save results
-    print(f"\n💾 Saving results to: {args.output_dir}")
+    print(f"\n[Save] Saving results to: {args.output_dir}")
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
@@ -368,7 +368,7 @@ def main(args):
         img_np = (img_tensor.permute(1, 2, 0) * 127.5 + 127.5).clamp(0, 255).to(torch.uint8).numpy()
         Image.fromarray(img_np).save(os.path.join(args.output_dir, f"{i}.png"))
 
-    print(f"\n✅ All done!")
+    print(f"\n[Done] All adversarial samples generated.")
 
 if __name__ == "__main__":
     args = parse_args()
