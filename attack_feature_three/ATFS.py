@@ -11,11 +11,16 @@ from colorama import Fore, Style, init, Back
 import random, time
 import matplotlib.pyplot as plt
 
-'''some system level settings'''
 init(autoreset=True)
-sys.path.insert(0, sys.path[0]+"/../")
+sys.path.insert(0, sys.path[0] + "/../")
 
 from model import Generator, Discriminator
+try:
+    from stgan_model import STGANGenerator
+    STGAN_AVAILABLE = True
+except ImportError:
+    STGAN_AVAILABLE = False
+
 import datasets
 import diffusers
 import numpy as np
@@ -41,42 +46,35 @@ from utils import *
 
 logger = get_logger(__name__)
 
+
 # =========================================================================
-# 1. Helper: gradient L2 normalization (ATFS: g_hat_k = g_k / (||g_k||_2 + xi))
+# 1. Helper: gradient L2 normalization (ATFS: g_hat_k = g_k / (||g_k|| + xi))
 # =========================================================================
 def normalize_grad(g, xi=1e-8):
-    """L2-normalize a single task gradient before fusion.
-
-    The paper requires each gradient to be unit-normalized before ensemble
-    weighting, so omega_k reflects each model's influence rather than being
-    dominated by gradient magnitude. Norm is computed in fp32 to avoid
-    fp16 overflow on large tensors.
-    """
     g = g.float()
     return g / (g.norm() + xi)
+
 
 # =========================================================================
 # 2. Helper: load target image
 # =========================================================================
 def load_target_image_tensor(path, size=512, device='cuda', dtype=torch.float32):
-    """Load a single target image and convert it to a tensor."""
     if not os.path.exists(path):
-        print(f"{Fore.RED}[Warning] Target image not found: {path}; using random noise as target.{Style.RESET_ALL}")
+        print(f"{Fore.RED}[Warning] Target image not found: {path}; using random noise.{Style.RESET_ALL}")
         return torch.randn(1, 3, size, size, device=device, dtype=dtype)
 
     image = Image.open(path).convert("RGB")
-
     transform = transforms.Compose([
         transforms.Resize((size, size), interpolation=transforms.InterpolationMode.BILINEAR),
         transforms.ToTensor(),
         transforms.Normalize([0.5], [0.5]),
     ])
-
     img_tensor = transform(image).unsqueeze(0)
     return img_tensor.to(device, dtype=dtype)
 
+
 # =========================================================================
-# 3. Core attack: three-model joint feature attack (strict ATFS)
+# 3. ATFS attack (Algorithm 1)
 # =========================================================================
 def pgd_attack_combined(
     args,
@@ -86,27 +84,24 @@ def pgd_attack_combined(
     noise_scheduler_dm,
     vae_dm,
     generator_gan,
-    vae_vq,  # VQ-VAE model
+    vae_vq,
     data_tensor,
     original_images,
     weight_dtype
 ):
     """
-    Joint attack: SD (VAE Latent) + StarGAN (Encoder Feature) + VQ-VAE (Latent).
-    Strictly follows the ATFS paper: per-model gradient normalization followed by
-    weighted synergy (no PCGrad conflict resolution).
+    ATFS attack following Algorithm 1.
+    Supports selective model activation via args.active_models.
+    Available models: sd, gan, stgan, vqvae.
     """
     unet_dm, text_encoder_dm = models_dm
     device = accelerator.device
+    active = set(args.active_models.split(","))
 
-    # delta_0 = 0  (perturbed_images starts as the clean image)
     perturbed_images = data_tensor.detach().clone().to(device, dtype=weight_dtype)
     original_images = original_images.to(device, dtype=weight_dtype)
 
-    # -----------------------------------------------------------
-    # Phase 1: Precompute Target Features
-    #   t_k = N_k(Phi_k(x_tgt)), extracted once and detached
-    # -----------------------------------------------------------
+    # ---- Phase 1: Precompute Target Features ----
     target_img_tensor = load_target_image_tensor(
         args.target_image_path,
         size=args.resolution,
@@ -115,85 +110,115 @@ def pgd_attack_combined(
     )
 
     with torch.no_grad():
-        # [Target 1] SD VAE Latent
-        target_feature_dm = vae_dm.encode(target_img_tensor).latent_dist.mode() * vae_dm.config.scaling_factor
-        target_feature_dm = target_feature_dm.detach()
+        target_feature_dm = None
+        target_feature_gan = None
+        target_feature_vq = None
+        c_trg_gan_dummy = None
 
-        # [Target 2] StarGAN Encoder Feature (layer 8)
-        c_trg_gan_dummy = torch.zeros(1, args.stargan_c_dim, device=device, dtype=weight_dtype)
-        _, target_features_gan_list = generator_gan(target_img_tensor, c_trg_gan_dummy)
-        target_feature_gan = target_features_gan_list[8].detach()
+        if "sd" in active:
+            target_feature_dm = vae_dm.encode(target_img_tensor).latent_dist.mode() * vae_dm.config.scaling_factor
+            target_feature_dm = target_feature_dm.detach()
 
-        # [Target 3] VQ-VAE Latent  (latent = mode() * scaling)
-        target_feature_vq = vae_vq.encode(target_img_tensor).latent_dist.mode() * args.vqvae_scaling_factor
-        target_feature_vq = target_feature_vq.detach()
+        if generator_gan is not None and ("gan" in active or "stgan" in active):
+            c_trg_gan_dummy = torch.zeros(1, args.stargan_c_dim, device=device, dtype=weight_dtype)
+            _, target_features_gan_list = generator_gan(target_img_tensor, c_trg_gan_dummy)
+            target_feature_gan = target_features_gan_list[8].detach()
 
-    # -----------------------------------------------------------
-    # Phase 2: Synergistic Optimization Loop
-    # -----------------------------------------------------------
+        if vae_vq is not None and "vqvae" in active:
+            if hasattr(vae_vq, 'latent_dist'):
+                target_feature_vq = vae_vq.encode(target_img_tensor).latent_dist.mode() * args.vqvae_scaling_factor
+            elif hasattr(vae_vq, 'encode'):
+                enc_out = vae_vq.encode(target_img_tensor)
+                if hasattr(enc_out, 'latents'):
+                    target_feature_vq = enc_out.latents * args.vqvae_scaling_factor
+                else:
+                    target_feature_vq = enc_out * args.vqvae_scaling_factor
+            target_feature_vq = target_feature_vq.detach()
+
+    # ---- Phase 2: Synergistic Optimization Loop ----
     batch_size = perturbed_images.shape[0]
 
-    # Expand target features to the batch dimension
-    batch_target_dm = target_feature_dm.repeat(batch_size, 1, 1, 1)
-    batch_target_gan = target_feature_gan.repeat(batch_size, 1, 1, 1)
-    batch_target_vq = target_feature_vq.repeat(batch_size, 1, 1, 1)
-    batch_c_gan = c_trg_gan_dummy.repeat(batch_size, 1)
+    batch_target_dm = target_feature_dm.repeat(batch_size, 1, 1, 1) if target_feature_dm is not None else None
+    batch_target_gan = target_feature_gan.repeat(batch_size, 1, 1, 1) if target_feature_gan is not None else None
+    batch_target_vq = target_feature_vq.repeat(batch_size, 1, 1, 1) if target_feature_vq is not None else None
+    batch_c_gan = c_trg_gan_dummy.repeat(batch_size, 1) if c_trg_gan_dummy is not None else None
 
-    # Ensemble weights omega_k (order: SD, StarGAN, VQ-VAE) and small constant xi
-    omega_dm, omega_gan, omega_vq = [float(w) for w in args.ensemble_weights.split(",")]
+    weights = [float(w) for w in args.ensemble_weights.split(",")]
+    w_idx = 0
+    omega_dm = omega_gan = omega_vq = 0.0
+    if "sd" in active:
+        omega_dm = weights[w_idx]; w_idx += 1
+    if generator_gan is not None and ("gan" in active or "stgan" in active):
+        omega_gan = weights[w_idx]; w_idx += 1
+    if vae_vq is not None and "vqvae" in active:
+        omega_vq = weights[w_idx]; w_idx += 1
     xi = 1e-8
 
-    tbar = tqdm(range(args.max_adv_train_steps), desc="ATFS synergistic optimization", leave=False)
+    tbar = tqdm(range(args.max_adv_train_steps), desc="ATFS optimization", leave=False)
 
     for step in tbar:
         perturbed_images.requires_grad = True
+        grads = []
 
-        # --- Loss 1: SD VAE ---  l_1 = ||f_1 - t_1||_2^2
-        latents_dm = vae_dm.encode(perturbed_images).latent_dist.mode() * vae_dm.config.scaling_factor
-        loss_dm = (latents_dm.float() - batch_target_dm.float()).pow(2).sum()
-        grad_dm = normalize_grad(autograd.grad(loss_dm, perturbed_images)[0], xi)   # g_hat_1
+        # --- Loss 1: SD VAE ---
+        if "sd" in active:
+            latents_dm = vae_dm.encode(perturbed_images).latent_dist.mode() * vae_dm.config.scaling_factor
+            loss_dm = (latents_dm.float() - batch_target_dm.float()).pow(2).sum()
+            grad_dm = normalize_grad(autograd.grad(loss_dm, perturbed_images)[0], xi)
+            grads.append(omega_dm * grad_dm)
 
-        # --- Loss 2: StarGAN ---  l_2 = ||f_2 - t_2||_2^2
-        _, current_features_gan_list = generator_gan(perturbed_images, batch_c_gan)
-        current_feature_gan = current_features_gan_list[8]
-        loss_gan = (current_feature_gan.float() - batch_target_gan.float()).pow(2).sum()
-        grad_gan = normalize_grad(autograd.grad(loss_gan, perturbed_images)[0], xi) # g_hat_2
+        # --- Loss 2: GAN (StarGAN or STGAN) ---
+        if generator_gan is not None and ("gan" in active or "stgan" in active):
+            _, current_features_gan_list = generator_gan(perturbed_images, batch_c_gan)
+            current_feature_gan = current_features_gan_list[8]
+            loss_gan = (current_feature_gan.float() - batch_target_gan.float()).pow(2).sum()
+            grad_gan = normalize_grad(autograd.grad(loss_gan, perturbed_images)[0], xi)
+            grads.append(omega_gan * grad_gan)
 
-        # --- Loss 3: VQ-VAE ---  l_3 = ||f_3 - t_3||_2^2
-        latents_vq = vae_vq.encode(perturbed_images).latent_dist.mode() * args.vqvae_scaling_factor
-        loss_vq = (latents_vq.float() - batch_target_vq.float()).pow(2).sum()
-        grad_vq = normalize_grad(autograd.grad(loss_vq, perturbed_images)[0], xi)   # g_hat_3
+        # --- Loss 3: VQ-VAE ---
+        if vae_vq is not None and "vqvae" in active:
+            if hasattr(vae_vq, 'latent_dist'):
+                latents_vq = vae_vq.encode(perturbed_images).latent_dist.mode() * args.vqvae_scaling_factor
+            elif hasattr(vae_vq, 'encode'):
+                enc_out = vae_vq.encode(perturbed_images)
+                if hasattr(enc_out, 'latents'):
+                    latents_vq = enc_out.latents * args.vqvae_scaling_factor
+                else:
+                    latents_vq = enc_out * args.vqvae_scaling_factor
+            loss_vq = (latents_vq.float() - batch_target_vq.float()).pow(2).sum()
+            grad_vq = normalize_grad(autograd.grad(loss_vq, perturbed_images)[0], xi)
+            grads.append(omega_vq * grad_vq)
 
         # --- Synergistic gradient: g_syn = sum_k omega_k * g_hat_k ---
-        g_syn = (omega_dm * grad_dm + omega_gan * grad_gan + omega_vq * grad_vq).to(weight_dtype)
+        g_syn = sum(grads).to(weight_dtype)
 
-        # --- PGD update: delta <- Clip_{[-eps,eps]}(delta - alpha * sign(g_syn)) ---
-        # Only delta is clipped inside the loop (paper); the image-range clip is
-        # applied once after the loop ends.
+        # --- PGD update ---
         alpha = args.pgd_alpha
         eps = args.pgd_eps
         with torch.no_grad():
-            delta = perturbed_images - original_images                              # delta_t
-            delta = torch.clamp(delta - alpha * g_syn.sign(), min=-eps, max=eps)    # delta_{t+1}
-            perturbed_images = (original_images + delta).detach()                   # x + delta_{t+1}
+            delta = perturbed_images - original_images
+            delta = torch.clamp(delta - alpha * g_syn.sign(), min=-eps, max=eps)
+            perturbed_images = (original_images + delta).detach()
 
-        tbar.set_postfix(
-            L_dm=f"{loss_dm.item():.4f}",
-            L_gan=f"{loss_gan.item():.4f}",
-            L_vq=f"{loss_vq.item():.4f}"
-        )
+        postfix = {}
+        if "sd" in active:
+            postfix["L_dm"] = f"{loss_dm.item():.4f}"
+        if generator_gan is not None and ("gan" in active or "stgan" in active):
+            postfix["L_gan"] = f"{loss_gan.item():.4f}"
+        if vae_vq is not None and "vqvae" in active:
+            postfix["L_vq"] = f"{loss_vq.item():.4f}"
+        tbar.set_postfix(**postfix)
 
-    # x_adv = Clip to valid image range (paper: Clip_{[0,1]}(x + delta_T)).
-    # Data here is normalized to [-1,1], which is the equivalent of [0,1].
     x_adv = torch.clamp(perturbed_images, min=-1, max=1)
     return x_adv
+
 
 # =========================================================================
 # 4. Data loading
 # =========================================================================
 def load_data(data_dir, size=512) -> torch.Tensor:
     image_transforms = transforms.Compose([
-        transforms.Resize((size,size), interpolation=transforms.InterpolationMode.BILINEAR),
+        transforms.Resize((size, size), interpolation=transforms.InterpolationMode.BILINEAR),
         transforms.ToTensor(),
         transforms.Normalize([0.5], [0.5]),
     ])
@@ -218,50 +243,56 @@ def load_data(data_dir, size=512) -> torch.Tensor:
     print(f"== Data tensor shape: {images.shape} ==")
     return images
 
+
 # =========================================================================
 # 5. Argument parsing
 # =========================================================================
 def parse_args(input_args=None):
-    parser = argparse.ArgumentParser(description="MIST + StarGAN + VQVAE Combined Attack")
+    parser = argparse.ArgumentParser(description="ATFS: Architecture-Agnostic Targeted Feature Synergy")
 
-    # Basic config
     parser.add_argument("--cuda", action='store_true', default=True)
     parser.add_argument("--output_dir", type=str, default="./output_adv")
     parser.add_argument("--instance_data_dir", type=str, required=True)
-    parser.add_argument("--target_image_path", type=str, default="data/MIST.png")
+    parser.add_argument("--target_image_path", type=str, default="data/ATFS.png")
 
     # Model paths
-    parser.add_argument("--pretrained_model_name_or_path", type=str, default="./stable-diffusion", help="SD model path")
-    parser.add_argument("--stargan_model_path", type=str, default="./models/stargan_G.ckpt", help="StarGAN weights")
-    parser.add_argument("--vqvae_model_path", type=str, default="./", help="VQ-VAE model path")
+    parser.add_argument("--pretrained_model_name_or_path", type=str, default="./stable-diffusion")
+    parser.add_argument("--stargan_model_path", type=str, default="./attack_feature_three/stargan_celeba_256/models/200000-G.ckpt")
+    parser.add_argument("--stgan_model_path", type=str, default="./attack_feature_three/stgan_G.pth")
+    parser.add_argument("--vqvae_model_path", type=str, default="./attack_feature_three/VQ-VAE/")
 
-    # Attack parameters
+    # Attack parameters (aligned with paper: eps=6/255, T=100, alpha=eps/10)
     parser.add_argument("--resolution", type=int, default=512)
     parser.add_argument("--batch_size", type=int, default=1)
-    parser.add_argument("--max_adv_train_steps", type=int, default=50)
-    parser.add_argument("--pgd_alpha", type=float, default=0.005)
-    parser.add_argument("--pgd_eps", type=float, default=0.05)
-    parser.add_argument("--vqvae_scaling_factor", type=float, default=1.0, help="VQ-VAE scaling factor")
-    parser.add_argument("--ensemble_weights", type=str, default="1.0,5.0,5.0",
-                        help="Ensemble weights omega_k, comma-separated, order: SD, StarGAN, VQ-VAE")
+    parser.add_argument("--max_adv_train_steps", type=int, default=100)
+    parser.add_argument("--pgd_alpha", type=float, default=0.00235, help="Step size alpha = eps/10")
+    parser.add_argument("--pgd_eps", type=float, default=0.02353, help="Perturbation budget eps = 6/255")
+    parser.add_argument("--vqvae_scaling_factor", type=float, default=1.0)
+    parser.add_argument("--ensemble_weights", type=str, default="1.0,5.0",
+                        help="Weights omega_k for active models, comma-separated. Order follows active_models.")
+
+    # Model selection
+    parser.add_argument("--active_models", type=str, default="sd,gan",
+                        help="Comma-separated: sd, gan, stgan, vqvae. Default: sd,gan (two-model, Table III).")
+    parser.add_argument("--gan_type", type=str, default="stargan", choices=["stargan", "stgan"],
+                        help="GAN architecture: stargan (Choi 2018) or stgan (SPADE)")
 
     # StarGAN config
     parser.add_argument('--stargan_c_dim', type=int, default=5)
     parser.add_argument('--stargan_g_conv_dim', type=int, default=64)
     parser.add_argument('--stargan_g_repeat_num', type=int, default=6)
 
-    # Compatibility args
+    # Compatibility
     parser.add_argument("--revision", type=str, default="")
     parser.add_argument("--mixed_precision", type=str, default="fp16", choices=["no", "fp16", "bf16"])
     parser.add_argument("--logging_dir", type=str, default="logs")
     parser.add_argument("--report_to", type=str, default="tensorboard")
-
-    # Allow tf32, low_vram_mode, etc. (used by previous scripts)
     parser.add_argument("--low_vram_mode", action='store_true')
     parser.add_argument("--instance_prompt", type=str, default="a person")
 
     args = parser.parse_args(input_args)
     return args
+
 
 def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: str, revision: str):
     text_encoder_config = PretrainedConfig.from_pretrained(
@@ -274,11 +305,15 @@ def import_model_class_from_model_name_or_path(pretrained_model_name_or_path: st
     else:
         return transformers.CLIPTextModel
 
+
 # =========================================================================
 # 6. Main
 # =========================================================================
 def main(args):
-    print(f"\n{Fore.GREEN}[Start] Launching joint adversarial attack (SD + StarGAN + VQVAE)...{Style.RESET_ALL}")
+    active = set(args.active_models.split(","))
+    gan_label = "stgan" if args.gan_type == "stgan" else "gan"
+    models_str = ",".join(sorted(active))
+    print(f"\n{Fore.GREEN}[Start] ATFS attack | active models: {models_str}{Style.RESET_ALL}")
 
     accelerator = Accelerator(
         mixed_precision=args.mixed_precision,
@@ -295,7 +330,7 @@ def main(args):
 
     print(f"Precision: {weight_dtype}")
 
-    # 1. Load Stable Diffusion
+    # 1. Load Stable Diffusion (always needed)
     print("\n[Loading] Stable Diffusion...")
     text_encoder_cls = import_model_class_from_model_name_or_path(args.pretrained_model_name_or_path, args.revision)
     text_encoder = text_encoder_cls.from_pretrained(args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision)
@@ -304,26 +339,51 @@ def main(args):
     tokenizer = AutoTokenizer.from_pretrained(args.pretrained_model_name_or_path, subfolder="tokenizer", revision=args.revision, use_fast=False)
     noise_scheduler = DDIMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
 
-    # 2. Load StarGAN
-    print("[Loading] StarGAN...")
-    generator_gan = Generator(args.stargan_g_conv_dim, args.stargan_c_dim, args.stargan_g_repeat_num)
-    if os.path.exists(args.stargan_model_path):
-        generator_gan.load_state_dict(torch.load(args.stargan_model_path, map_location="cpu"))
-    else:
-        print(f"{Fore.RED}[Error] StarGAN model file not found: {args.stargan_model_path}{Style.RESET_ALL}")
-        return
+    # 2. Load GAN (StarGAN or STGAN)
+    generator_gan = None
+    if gan_label in active or "gan" in active:
+        if args.gan_type == "stgan":
+            print("[Loading] STGAN (SPADE)...")
+            if not STGAN_AVAILABLE:
+                print(f"{Fore.RED}[Error] stgan_model.py not found. Falling back to StarGAN.{Style.RESET_ALL}")
+                args.gan_type = "stargan"
+            else:
+                generator_gan = STGANGenerator(args.stargan_g_conv_dim, args.stargan_c_dim, args.stargan_g_repeat_num)
+                if os.path.exists(args.stgan_model_path):
+                    generator_gan.load_state_dict(torch.load(args.stgan_model_path, map_location="cpu"))
+                else:
+                    print(f"{Fore.YELLOW}[Warning] STGAN weights not found: {args.stgan_model_path}. Using random init.{Style.RESET_ALL}")
+
+        if args.gan_type == "stargan" or generator_gan is None:
+            print("[Loading] StarGAN (v1, Choi 2018)...")
+            generator_gan = Generator(args.stargan_g_conv_dim, args.stargan_c_dim, args.stargan_g_repeat_num)
+            if os.path.exists(args.stargan_model_path):
+                generator_gan.load_state_dict(torch.load(args.stargan_model_path, map_location="cpu"))
+            else:
+                print(f"{Fore.RED}[Error] StarGAN model not found: {args.stargan_model_path}{Style.RESET_ALL}")
+                return
 
     # 3. Load VQ-VAE
-    print("[Loading] VQ-VAE...")
-    try:
-        vae_vq = AutoencoderKL.from_pretrained(args.vqvae_model_path, local_files_only=True)
-    except Exception as e:
-        print(f"{Fore.RED}[Error] Failed to load VQ-VAE: {e}{Style.RESET_ALL}")
-        print("Please check that --vqvae_model_path contains model_index.json or config.json")
-        return
+    vae_vq = None
+    if "vqvae" in active:
+        print("[Loading] VQ-VAE...")
+        try:
+            vae_vq = AutoencoderKL.from_pretrained(args.vqvae_model_path, local_files_only=True)
+        except Exception:
+            try:
+                from huggingface_hub import PyTorchModelHubMixin
+                vae_vq = PyTorchModelHubMixin.from_pretrained(args.vqvae_model_path)
+                print(f"{Fore.YELLOW}[Info] VQ-VAE loaded via PyTorchModelHubMixin (non-diffusers format).{Style.RESET_ALL}")
+            except Exception as e:
+                print(f"{Fore.RED}[Error] Failed to load VQ-VAE from {args.vqvae_model_path}: {e}{Style.RESET_ALL}")
+                vae_vq = None
 
     # 4. Move models to device
-    models_to_move = [vae_dm, text_encoder, unet, generator_gan, vae_vq]
+    models_to_move = [vae_dm, text_encoder, unet]
+    if generator_gan is not None:
+        models_to_move.append(generator_gan)
+    if vae_vq is not None:
+        models_to_move.append(vae_vq)
     for model in models_to_move:
         model.to(device=accelerator.device, dtype=weight_dtype).eval()
         model.requires_grad_(False)
@@ -358,7 +418,7 @@ def main(args):
         all_perturbed_data_list.append(adv_batch.cpu())
 
     # 7. Save results
-    print(f"\n[Save] Saving results to: {args.output_dir}")
+    print(f"\n[Save] Saving to: {args.output_dir}")
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
 
@@ -369,6 +429,7 @@ def main(args):
         Image.fromarray(img_np).save(os.path.join(args.output_dir, f"{i}.png"))
 
     print(f"\n[Done] All adversarial samples generated.")
+
 
 if __name__ == "__main__":
     args = parse_args()
