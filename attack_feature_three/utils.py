@@ -58,7 +58,7 @@ def label2onehot(labels, dim):
 
 def create_labels(c_org, c_dim=5, dataset='CelebA', selected_attrs=None):
     """
-    改进版 create_labels：只改某个维度，其它属性保持不变
+    Improved create_labels: only modify one dimension, keep others unchanged.
     """
     hair_color_indices = [i for i, attr in enumerate(selected_attrs) if attr in ['Black_Hair', 'Blond_Hair', 'Brown_Hair', 'Gray_Hair']]
     
@@ -66,12 +66,12 @@ def create_labels(c_org, c_dim=5, dataset='CelebA', selected_attrs=None):
     for i in range(c_dim):
         c_trg = c_org.clone()
 
-        # 如果是头发颜色：只保留当前颜色，其余置 0
+        # For hair color: keep only current color, set others to 0
         if i in hair_color_indices:
             for j in hair_color_indices:
                 c_trg[:, j] = 1 if j == i else 0
         else:
-            # 只翻转当前维度，其他属性不变
+            # Reverse current dimension only, keep other attributes unchanged
             c_trg[:, i] = (c_trg[:, i] == 0)
 
         c_trg_list.append(c_trg.cuda())
@@ -102,7 +102,7 @@ def random_transform(img):
 #     img2_np = np.transpose(img2_np, (1, 2, 0))
 
 #     ssim = structural_similarity(img1_np, img2_np, win_size=5, channel_axis=-1, data_range=img1_np.max() - img1_np.min())
-#     # -----------------<<<<<<<<<<<<<<<<  下面这个是源码
+#     # -----------------<<<<<<<<<<<<<<<<  source code below
 #     # ssim = structural_similarity(img1_np,img2_np,multichannel=True)
 #     psnr = peak_signal_noise_ratio(img1_np,img2_np)
 
@@ -146,11 +146,11 @@ def lab_attack(X_nat, c_trg, model, epsilon=0.05, iter=100):
     for i in range(iter):
         X_lab = rgb2lab(X).cuda()
 
-        # 加扰动，并将 ab 通道限制在 [-1.2, 1.2]
+        # Add perturbation, clip ab channels to [-1.2, 1.2]
         pert = torch.clamp(pert_a, -epsilon, epsilon)
         X_lab[:, 1:, :, :] = torch.clamp(X_lab[:, 1:, :, :] + pert, -1.2, 1.2)
 
-        # 转换为 RGB + 标准化
+        # Convert to RGB + normalize
         X_new = lab2rgb(X_lab)
         X_new = torch.nan_to_num(X_new, nan=0.0, posinf=1.0, neginf=0.0)
         X_new = T.Normalize([0.5]*3, [0.5]*3)(X_new)
@@ -172,28 +172,29 @@ def lab_attack(X_nat, c_trg, model, epsilon=0.05, iter=100):
 
 def pixel_attack(X_nat, c_trg, model, epsilon=0.05, iter=100):
     """
-    在 RGB 像素空间上加扰动，优化目标是让生成图 G(x_adv, c_trg) 和 G(x_nat, c_trg) 差异最大。
-    输入图像范围：[-1, 1]
+    Add perturbation in RGB pixel space, optimize to maximize difference
+    between G(x_adv, c_trg) and G(x_nat, c_trg).
+    Input image range: [-1, 1]
     """
     criterion = nn.MSELoss().cuda()
     
-    # Step 1: 把输入从 [-1, 1] 转为 [0, 1]
+    # Step 1: Convert input from [-1, 1] to [0, 1]
     X_nat_denorm = denorm(X_nat.clone()).detach()
     
-    # Step 2: 初始化扰动张量
+    # Step 2: Initialize perturbation tensor
     pert = torch.zeros_like(X_nat_denorm, device=X_nat.device).requires_grad_()
 
     optimizer = torch.optim.Adam([pert], lr=1e-2)
 
     for i in range(iter):
-        # Step 3: 加扰动 + 裁剪回 [0, 1]
+        # Step 3: Add perturbation + clip to [0, 1]
         X_adv = X_nat_denorm + torch.clamp(pert, -epsilon, epsilon)
         X_adv = X_adv.clamp(0, 1)
 
-        # Step 4: 重新标准化回 [-1, 1]，供 G 使用
+        # Step 4: Re-normalize to [-1, 1] for G
         X_input = (X_adv - 0.5) * 2.0
 
-        # Step 5: 原图生成 vs 对抗图生成
+        # Step 5: Original generation vs adversarial generation
         gen_noattack, _ = model(X_nat, c_trg[i % len(c_trg)])
         gen_attack, _ = model(X_input, c_trg[i % len(c_trg)])
 
@@ -206,7 +207,7 @@ def pixel_attack(X_nat, c_trg, model, epsilon=0.05, iter=100):
         loss.backward()
         optimizer.step()
 
-    # Step 6: 返回扰动后的对抗图像
+    # Step 6: Return perturbed adversarial image
     X_adv_final = (X_nat_denorm + torch.clamp(pert, -epsilon, epsilon)).clamp(0, 1)
     return (X_adv_final - 0.5) * 2.0, X_adv_final - X_nat_denorm
 
