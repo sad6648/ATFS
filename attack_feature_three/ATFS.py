@@ -1,6 +1,6 @@
 import argparse
 import copy
-import hashlib
+
 import itertools
 import logging
 import os
@@ -9,7 +9,7 @@ import gc
 from pathlib import Path
 from colorama import Fore, Style, init, Back
 import random, time
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
 init(autoreset=True)
 sys.path.insert(0, sys.path[0] + "/../")
@@ -21,7 +21,6 @@ try:
 except ImportError:
     STGAN_AVAILABLE = False
 
-import datasets
 import diffusers
 import numpy as np
 import torch
@@ -37,11 +36,9 @@ from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms
 from tqdm.auto import tqdm
-from torch.cuda.amp import GradScaler, autocast
 from transformers import AutoTokenizer, PretrainedConfig
 from torch import autograd
 from typing import Optional, Tuple
-import pynvml
 from utils import *
 
 logger = get_logger(__name__)
