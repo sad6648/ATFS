@@ -30,32 +30,6 @@ def label2onehot(labels, dim):
     out[np.arange(batch_size), labels.long()] = 1
     return out
 
-# def create_labels(c_org, c_dim=5, dataset='CelebA', selected_attrs=None):
-#     """Generate target domain labels for debugging and testing."""
-#     # Get hair color indices.
-#     if dataset == 'CelebA':
-#         hair_color_indices = []
-#         for i, attr_name in enumerate(selected_attrs):
-#             if attr_name in ['Black_Hair', 'Blond_Hair', 'Brown_Hair', 'Gray_Hair']:
-#                 hair_color_indices.append(i)
-
-#     c_trg_list = []
-#     for i in range(c_dim):
-#         if dataset == 'CelebA':
-#             c_trg = c_org.clone()
-#             if i in hair_color_indices:  # Set one hair color to 1 and the rest to 0.
-#                 c_trg[:, i] = 1
-#                 for j in hair_color_indices:
-#                     if j != i:
-#                         c_trg[:, j] = 0
-#             else:
-#                 c_trg[:, i] = (c_trg[:, i] == 0)  # Reverse attribute value.
-#         elif dataset == 'RaFD':
-#             c_trg = label2onehot(torch.ones(c_org.size(0)) * i, c_dim)
-
-#         c_trg_list.append(c_trg.cuda())
-#     return c_trg_list
-
 def create_labels(c_org, c_dim=5, dataset='CelebA', selected_attrs=None):
     """
     Improved create_labels: only modify one dimension, keep others unchanged.
@@ -93,20 +67,6 @@ def random_transform(img):
     ])
 
     return T_compose(img)
-
-# def compare(img1,img2):
-#     """input tensor, translate to np.array"""
-#     img1_np = img1.squeeze(0).cpu().numpy()
-#     img2_np = img2.squeeze(0).cpu().numpy()
-#     img1_np = np.transpose(img1_np, (1, 2, 0))
-#     img2_np = np.transpose(img2_np, (1, 2, 0))
-
-#     ssim = structural_similarity(img1_np, img2_np, win_size=5, channel_axis=-1, data_range=img1_np.max() - img1_np.min())
-#     # -----------------<<<<<<<<<<<<<<<<  source code below
-#     # ssim = structural_similarity(img1_np,img2_np,multichannel=True)
-#     psnr = peak_signal_noise_ratio(img1_np,img2_np)
-
-#     return ssim, psnr
 
 def compare(img1, img2):
     """Input tensors [1,C,H,W] -> compute SSIM & PSNR"""
