@@ -19,9 +19,6 @@ def rgb2xyz(rgb):  # rgb from [0,1]
     z = .019334 * rgb[:, 0, :, :] + .119193 * rgb[:, 1, :, :] + .950227 * rgb[:, 2, :, :]
     out = torch.cat((x[:, None, :, :], y[:, None, :, :], z[:, None, :, :]), dim=1)
 
-    # if(torch.sum(torch.isnan(out))>0):
-    # print('rgb2xyz')
-    # embed()
     return out
 
 def xyz2rgb(xyz):
@@ -42,9 +39,6 @@ def xyz2rgb(xyz):
 
     rgb = (1.055 * (rgb ** (1. / 2.4)) - 0.055) * mask + 12.92 * rgb * (1 - mask)
 
-    # if(torch.sum(torch.isnan(rgb))>0):
-    # print('xyz2rgb')
-    # embed()
     return rgb
 
 def xyz2lab(xyz):
