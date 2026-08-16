@@ -33,7 +33,6 @@ Download the pre-trained weights and place them in the appropriate directories:
 
 - Stable Diffusion v1.5: https://huggingface.co/stable-diffusion-v1-5/stable-diffusion-v1-5
 - StarGAN v1 (Choi et al., 2018): Pre-trained on CelebA-HQ (`200000-G.ckpt`). https://huggingface.co/spaces/vipul2412/starGAN
-- STGAN (Liu et al., 2020): Generator with SPADE normalization. See `stgan_model.py` for architecture details. Pre-trained weights required.
 - VQ-VAE (Switti tokenizer): https://huggingface.co/yresearch/VQVAE-Switti
 
 ## Usage
