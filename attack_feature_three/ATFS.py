@@ -1,15 +1,9 @@
 import argparse
-import copy
-
-import itertools
 import logging
 import os
 import sys
-import gc
 from pathlib import Path
-from colorama import Fore, Style, init, Back
-import random, time
-# import matplotlib.pyplot as plt
+from colorama import Fore, Style, init
 
 init(autoreset=True)
 sys.path.insert(0, sys.path[0] + "/../")
@@ -21,25 +15,19 @@ try:
 except ImportError:
     STGAN_AVAILABLE = False
 
-import diffusers
 import numpy as np
 import torch
 import torch.nn.functional as F
-import torch.utils.checkpoint
 import transformers
 from accelerate import Accelerator
 from accelerate.logging import get_logger
-from accelerate.utils import set_seed
-from diffusers import AutoencoderKL, DDPMScheduler, DiffusionPipeline, UNet2DConditionModel, DDIMScheduler
-from diffusers.utils.import_utils import is_xformers_available
+from diffusers import AutoencoderKL, UNet2DConditionModel, DDIMScheduler
 from PIL import Image
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, TensorDataset
 from torchvision import transforms
 from tqdm.auto import tqdm
-from transformers import AutoTokenizer, PretrainedConfig
 from torch import autograd
-from typing import Optional, Tuple
-from utils import *
+from transformers import AutoTokenizer, PretrainedConfig
 
 logger = get_logger(__name__)
 
