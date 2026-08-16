@@ -6,8 +6,6 @@ from torchvision import transforms as T
 from skimage.metrics import peak_signal_noise_ratio
 from skimage.metrics import structural_similarity
 
-from color_space import *
-
 def load_model_weights(model, path):
     pretrained_dict = torch.load(path, map_location=lambda storage, loc: storage)
     model_dict = model.state_dict()
@@ -55,7 +53,6 @@ def create_labels(c_org, c_dim=5, dataset='CelebA', selected_attrs=None):
 def random_transform(img):
     T_list = [
         T.RandomHorizontalFlip(p=0.5),
-        #T.RandomErasing(p=1, scale=(0.03, 0.10)),
         T.RandomRotation(degrees=(-15, 15)),
         T.RandomVerticalFlip(p=0.5),
         T.RandomCrop((192,192)),
