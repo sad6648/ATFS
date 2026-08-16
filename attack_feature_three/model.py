@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-import sys
 
 
 class ResidualBlock(nn.Module):
@@ -142,10 +141,7 @@ class AvgBlurGenerator(nn.Module):
         layers.append(nn.Tanh())
         self.main = nn.Sequential(*layers)
 
-        layers_preproc = []
-        # layers_preproc.append(nn.ReflectionPad2d(2))
-        #layers_preproc.append(smoothing.AverageSmoothing2D(channels=3+c_dim, kernel_size=21))
-        self.preprocessing = nn.Sequential(*layers_preproc)
+        self.preprocessing = nn.Sequential()
 
     def forward(self, x, c):
         # Replicate spatially and concatenate domain information.
@@ -155,9 +151,7 @@ class AvgBlurGenerator(nn.Module):
         c = c.repeat(1, 1, x.size(2), x.size(3))
         x = torch.cat([x, c], dim=1)
 
-        # print(x.shape)
         x = self.preprocessing(x)
-        # print(x.shape)
         return self.main(x), x[:,:3]
 
 
