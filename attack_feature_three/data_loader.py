@@ -61,15 +61,7 @@ class CelebA(data.Dataset):
         dataset = self.train_dataset if self.mode == 'train' else self.test_dataset
         filename, label = dataset[index]
         image = Image.open(os.path.join(self.image_dir, filename))
-        # image = noise.noisy('s&p', image)
         return self.transform(image), torch.FloatTensor(label)
-
-    # def __getitem__(self, index):
-    #     """Return one image and its corresponding attribute label."""
-    #     dataset = self.train_dataset if self.mode == 'train' else self.test_dataset
-    #     filename, label = dataset[index]
-    #     image = Image.open(os.path.join(self.image_dir, filename))
-    #     return self.transform(image), torch.FloatTensor(label)
 
     def __len__(self):
         """Return the number of images."""
