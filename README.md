@@ -37,7 +37,7 @@ Download the pre-trained weights and place them in the appropriate directories:
 
 ## Usage
 
-### Two-model: SD + StarGAN (Table III)
+### Two-model: SD + StarGAN
 
 ```bash
 accelerate launch ./attack_feature_three/ATFS.py \
@@ -57,7 +57,26 @@ accelerate launch ./attack_feature_three/ATFS.py \
     --batch_size 1
 ```
 
-### Two-model: SD + STGAN (Table IV)
+### Two-model: SD + VQ-VAE
+
+```bash
+accelerate launch ./attack_feature_three/ATFS.py \
+    --cuda \
+    --instance_data_dir ./data/img \
+    --output_dir ./output \
+    --mixed_precision bf16 \
+    --max_adv_train_steps 100 \
+    --pgd_eps 0.02353 \
+    --pgd_alpha 0.00235 \
+    --active_models sd,vqvae \
+    --vqvae_model_path "./attack_feature_three/VQ-VAE/" \
+    --vqvae_scaling_factor 1.0 \
+    --ensemble_weights "1.0,5.0" \
+    --target_image_path "./data/ATFS.png" \
+    --batch_size 1
+```
+
+### Optional: SD + STGAN
 
 ```bash
 accelerate launch ./attack_feature_three/ATFS.py \
@@ -77,29 +96,10 @@ accelerate launch ./attack_feature_three/ATFS.py \
     --batch_size 1
 ```
 
-### Two-model: SD + VQ-VAE (Table V)
-
-```bash
-accelerate launch ./attack_feature_three/ATFS.py \
-    --cuda \
-    --instance_data_dir ./data/img \
-    --output_dir ./output \
-    --mixed_precision bf16 \
-    --max_adv_train_steps 100 \
-    --pgd_eps 0.02353 \
-    --pgd_alpha 0.00235 \
-    --active_models sd,vqvae \
-    --vqvae_model_path "./attack_feature_three/VQ-VAE/" \
-    --vqvae_scaling_factor 1.0 \
-    --ensemble_weights "1.0,5.0" \
-    --target_image_path "./data/ATFS.png" \
-    --batch_size 1
-```
-
 ## Key Arguments
 
 - `--active_models`: Comma-separated model list. Options: `sd`, `gan` (StarGAN), `stgan` (STGAN), `vqvae`. Default: `sd,gan` (Table III).
-- `--gan_type`: GAN architecture. `stargan` or `stgan`. Default: `stargan`.
+- `--gan_type`: GAN architecture. `stargan` (Choi 2018) or `stgan` (Liu et al. CVPR 2019). Default: `stargan`.
 - `--pgd_eps`: Perturbation budget (epsilon). Default: 0.02353 (6/255), matching the paper.
 - `--pgd_alpha`: Step size (alpha). Default: 0.00235 (eps/10), matching the paper.
 - `--max_adv_train_steps`: Number of PGD iterations (T). Default: 100, matching the paper.
@@ -125,7 +125,7 @@ python ./attack_feature_three/utility_test.py \
 
 - `attack_feature_three/ATFS.py`: Main attack script implementing Algorithm 1.
 - `attack_feature_three/model.py`: StarGAN v1 Generator and Discriminator.
-- `attack_feature_three/stgan_model.py`: STGAN Generator and Discriminator.
+- `attack_feature_three/stgan_model.py`: STGAN Generator with Selective Transfer Units and Discriminator.
 - `attack_feature_three/utils.py`: Utility functions.
 - `attack_feature_three/utility_test.py`: Benign utility test (MTCNN detection + FaceNet recognition).
 
