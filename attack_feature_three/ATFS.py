@@ -272,7 +272,7 @@ def parse_args(input_args=None):
     parser.add_argument("--active_models", type=str, default="sd,gan",
                         help="Comma-separated: sd, gan, stgan, vqvae. Default: sd,gan (two-model, Table III).")
     parser.add_argument("--gan_type", type=str, default="stargan", choices=["stargan", "stgan"],
-                        help="GAN architecture: stargan (Choi 2018) or stgan (SPADE)")
+                        help="GAN architecture: stargan or stgan")
 
     # StarGAN config
     parser.add_argument('--stargan_c_dim', type=int, default=5)
@@ -340,7 +340,7 @@ def main(args):
     generator_gan = None
     if gan_label in active or "gan" in active:
         if args.gan_type == "stgan":
-            print("[Loading] STGAN (SPADE)...")
+            print("[Loading] STGAN ...")
             if not STGAN_AVAILABLE:
                 print(f"{Fore.RED}[Error] stgan_model.py not found. Falling back to StarGAN.{Style.RESET_ALL}")
                 args.gan_type = "stargan"
