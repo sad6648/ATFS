@@ -98,8 +98,8 @@ accelerate launch ./attack_feature_three/ATFS.py \
 
 ## Key Arguments
 
-- `--active_models`: Comma-separated model list. Options: `sd`, `gan` (StarGAN), `stgan` (STGAN/SPADE), `vqvae`. Default: `sd,gan` (Table III).
-- `--gan_type`: GAN architecture. `stargan` (Choi 2018) or `stgan` (SPADE). Default: `stargan`.
+- `--active_models`: Comma-separated model list. Options: `sd`, `gan` (StarGAN), `stgan` (STGAN), `vqvae`. Default: `sd,gan` (Table III).
+- `--gan_type`: GAN architecture. `stargan` or `stgan`. Default: `stargan`.
 - `--pgd_eps`: Perturbation budget (epsilon). Default: 0.02353 (6/255), matching the paper.
 - `--pgd_alpha`: Step size (alpha). Default: 0.00235 (eps/10), matching the paper.
 - `--max_adv_train_steps`: Number of PGD iterations (T). Default: 100, matching the paper.
@@ -125,7 +125,7 @@ python ./attack_feature_three/utility_test.py \
 
 - `attack_feature_three/ATFS.py`: Main attack script implementing Algorithm 1.
 - `attack_feature_three/model.py`: StarGAN v1 Generator and Discriminator.
-- `attack_feature_three/stgan_model.py`: STGAN Generator (SPADE) and Discriminator.
+- `attack_feature_three/stgan_model.py`: STGAN Generator and Discriminator.
 - `attack_feature_three/utils.py`: Utility functions.
 - `attack_feature_three/utility_test.py`: Benign utility test (MTCNN detection + FaceNet recognition).
 
